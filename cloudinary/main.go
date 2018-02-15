@@ -13,8 +13,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gotsunami/go-cloudinary"
 	"github.com/outofpluto/goconfig/config"
+	cloudinary "github.com/themintjp/go-cloudinary"
 )
 
 type Config struct {
@@ -205,6 +205,7 @@ uri=cloudinary://api_key:api_secret@cloud_name
 
 	optRaw := flag.String("r", "", "raw filename or public id")
 	optImg := flag.String("i", "", "image filename or public id")
+	optPid := flag.String("p", "", "public id")
 	optVerbose := flag.Bool("v", false, "verbose output")
 	optSimulate := flag.Bool("s", false, "simulate, do nothing (dry run)")
 	optAll := flag.Bool("a", false, "applies to all resource files")
@@ -263,6 +264,12 @@ uri=cloudinary://api_key:api_secret@cloud_name
 	case "up":
 		if *optRaw == "" && *optImg == "" {
 			fail("Missing -i or -r option.")
+		}
+		if *optPid != "" && *optImg != "" {
+			if _, err := service.UploadURL(*optImg, *optPid); err != nil {
+				perror(err)
+			}
+			break
 		}
 		if *optRaw != "" {
 			step("Uploading as raw data")

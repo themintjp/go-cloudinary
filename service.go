@@ -484,6 +484,82 @@ func (s *Service) UploadVideo(path string, data io.Reader, prepend string) (stri
 func (s *Service) UploadPdf(path string, data io.Reader, prepend string) (string, error) {
 	return s.Upload(path, data, prepend, false, PdfType)
 }
+func (service *Service) UploadURL(path string, publicID string) (string, error) {
+	buf := new(bytes.Buffer)
+	w := multipart.NewWriter(buf)
+
+	// public_id
+	pi, err := w.CreateFormField("public_id")
+	if err != nil {
+		return path, err
+	}
+	pi.Write([]byte(publicID))
+
+	// api_key
+	ak, err := w.CreateFormField("api_key")
+	if err != nil {
+		return path, err
+	}
+	ak.Write([]byte(service.apiKey))
+
+	// Write timestamp
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	ts, err := w.CreateFormField("timestamp")
+	if err != nil {
+		return path, err
+	}
+	ts.Write([]byte(timestamp))
+
+	// Write signature
+	hash := sha1.New()
+	part := fmt.Sprintf("timestamp=%s%s", timestamp, service.apiSecret)
+	part = fmt.Sprintf("public_id=%s&%s", publicID, part)
+
+	io.WriteString(hash, part)
+	signature := fmt.Sprintf("%x", hash.Sum(nil))
+
+	si, err := w.CreateFormField("signature")
+	if err != nil {
+		return path, err
+	}
+	si.Write([]byte(signature))
+
+	// Write file field
+	fw, err := w.CreateFormField("file")
+	if err != nil {
+		return path, err
+	}
+	fw.Write([]byte(path))
+	w.Close()
+
+	upURI := service.uploadURI.String()
+
+	req, err := http.NewRequest("POST", upURI, buf)
+	if err != nil {
+		return path, err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp, err := http.DefaultClient.Do(req)
+
+	if err != nil {
+		return path, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		// Body is JSON data and looks like:
+		// {"public_id":"Downloads/file","version":1369431906,"format":"png","resource_type":"image"}
+		dec := json.NewDecoder(resp.Body)
+		upInfo := new(uploadResponse)
+		if err := dec.Decode(upInfo); err != nil {
+			return path, err
+		}
+		return upInfo.PublicId, nil
+	} else {
+		return path, errors.New("Request error: " + resp.Status)
+	}
+
+}
 
 // Upload a file or a set of files to the cloud. The path parameter is
 // a file location or a directory. If the source path is a directory,
@@ -511,6 +587,10 @@ func (s *Service) Upload(path string, data io.Reader, prepend string, randomPubl
 	s.basePathDir = ""
 	s.prependPath = prepend
 	if data == nil {
+		if strings.HasPrefix(path, "http") {
+			return s.uploadFile(path, nil, randomPublicId)
+		}
+
 		info, err := os.Stat(path)
 		if err != nil {
 			return path, err
